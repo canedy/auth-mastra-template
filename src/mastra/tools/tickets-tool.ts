@@ -1,6 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { makeVerifier } from "../../auth/verifyAssertion";
+import { makeAccessTokenVerifier, makeVerifier } from "../../auth/verifyAssertion";
 
 interface Ticket {
   id: string;
@@ -11,20 +11,44 @@ interface Ticket {
   createdAt?: string;
 }
 
-const verify = makeVerifier(
+// Use token service JWKS for access token verification
+const verifyAccessToken = makeAccessTokenVerifier(
+  process.env.TOKEN_SERVICE_JWKS_URL ?? "http://localhost:8787/.well-known/jwks.json",
+  process.env.TICKETS_AUD ?? "https://tools.local/tickets"
+);
+
+// Fallback verifier for direct JWTs (when token service is unavailable)
+const verifyDirectJWT = makeVerifier(
   process.env.JWKS_URL ?? "http://localhost:8787/.well-known/jwks.json",
   process.env.TICKETS_AUD ?? "https://tools.local/tickets"
 );
 
-// policy check (super simple): allow only specific agents
-const ALLOWED_AGENTS = new Set([
-  "agent://demo/a1",
-  "agent://helpdesk/hd1",
-  "agent://worf", // From the private key file
-  "a1-ed25519-2023-10-01-12345678",
-  process.env.AGENT_ID,
-  process.env.HELPDESK_AGENT_ID,
-]);
+// Helper function to verify token - ONLY accepts access tokens from token service
+async function verifyToken(authHeader: string, requiredScope: string) {
+  try {
+    // Only accept access tokens from token service
+    const result = await verifyAccessToken(authHeader);
+    
+    // Check if token has required scope
+    if (!result.scopes.includes(requiredScope)) {
+      throw new Error(`Insufficient permissions: ${requiredScope} scope required`);
+    }
+    
+    return { agentId: result.agentId, scopes: result.scopes };
+  } catch (error: any) {
+    // No fallback - proper security requires the token service to be running
+    if (error.message.includes('Invalid issuer')) {
+      throw new Error('Token service required - direct JWT not accepted for security');
+    }
+    
+    throw error; // Re-throw the original error
+  }
+}
+
+// Helper function to check if scopes include required permission
+function hasRequiredScope(scopes: string[], required: string): boolean {
+  return scopes.includes(required);
+}
 
 export const ticketsTool = createTool({
   id: "get-tickets",
@@ -52,16 +76,10 @@ export const ticketsTool = createTool({
   }),
   execute: async ({ context }) => {
     try {
-      const { agentId: verifiedAgentId } = await verify(
-        `Bearer ${context.authToken}`
-      );
-
-      if (!ALLOWED_AGENTS.has(verifiedAgentId)) {
-        throw new Error("Agent not authorized to access tickets");
-      }
-
-      // Use the verified agent ID from the JWT token
-      return await getTickets(verifiedAgentId, context.status);
+      const { agentId } = await verifyToken(`Bearer ${context.authToken}`, "tickets.read");
+      
+      // Use the verified agent ID from the token
+      return await getTickets(agentId, context.status);
     } catch (error: any) {
       throw new Error(`Authentication failed: ${error.message}`);
     }
@@ -132,19 +150,13 @@ export const createTicketTool = createTool({
   }),
   execute: async ({ context }) => {
     try {
-      const { agentId: verifiedAgentId } = await verify(
-        `Bearer ${context.authToken}`
-      );
-
-      if (!ALLOWED_AGENTS.has(verifiedAgentId)) {
-        throw new Error("Agent not authorized to create tickets");
-      }
-
-      // Use the verified agent ID from the JWT token
+      const { agentId } = await verifyToken(`Bearer ${context.authToken}`, "tickets.write");
+      
+      // Use the verified agent ID from the token
       return await createTicket(
         context.title,
         context.description,
-        verifiedAgentId
+        agentId
       );
     } catch (error: any) {
       throw new Error(`Authentication failed: ${error.message}`);

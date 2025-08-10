@@ -5,26 +5,85 @@ import { LibSQLStore } from "@mastra/libsql";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { ticketsTool, createTicketTool } from "../tools/tickets-tool";
-import { makeClientAssertion } from "../../auth/signAssertion";
+import { exchangeForAccessToken, makeClientAssertion } from "../../auth/signAssertion";
 
-async function getAuthToken(): Promise<string> {
+// Token cache to avoid repeated exchanges
+const tokenCache = new Map<string, { token: string; expires: number }>();
+
+// Helper function to decode JWT payload without verification
+function decodeJWTPayload(token: string) {
+  try {
+    const parts = token.split('.');
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    return payload;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getAccessToken(targetAudience: string, scopes: string[]): Promise<string> {
   try {
     const privateJwkPath =
       process.env.HELPDESK_PRIVATE_JWK_PATH ||
       "/home/brucec/techplay2/sandbox/auth-template-hackathon-v0/secrets/a1-ed25519-2023-10-01-12345678.private.jwk.json";
-    const audience = process.env.TICKETS_AUD || "https://tools.local/tickets";
-    const agentId =
-      process.env.HELPDESK_AGENT_ID || "a1-ed25519-2023-10-01-1234567";
+    const agentId = process.env.HELPDESK_AGENT_ID || "agent://worf";
+    const tokenServiceUrl = process.env.TOKEN_SERVICE_URL || "http://localhost:8787";
+    
+    console.log(`Getting access token for audience: ${targetAudience}, scopes: ${scopes.join(',')}`);
+    console.log(`Using token service: ${tokenServiceUrl}`);
+    console.log(`Agent ID: ${agentId}`);
+    
+    // Create cache key
+    const cacheKey = `${targetAudience}:${scopes.sort().join(',')}`;
+    
+    // Check cache first
+    const cached = tokenCache.get(cacheKey);
+    if (cached && cached.expires > Date.now()) {
+      // Double-check the actual token hasn't expired
+      const payload = decodeJWTPayload(cached.token);
+      const tokenExp = payload?.exp * 1000; // Convert to milliseconds
+      
+      if (tokenExp && tokenExp > Date.now() + (30 * 1000)) { // 30 second buffer
+        console.log('Using cached token');
+        return cached.token;
+      } else {
+        console.log('Cached token expired, removing from cache');
+        tokenCache.delete(cacheKey);
+      }
+    }
 
-    return await makeClientAssertion({
+    console.log('Cache miss, requesting new token');
+
+    // Get access token from token service (no fallback for security)
+    const accessToken = await exchangeForAccessToken({
       privateJwkPath,
-      audience,
       agentId,
+      tokenServiceUrl,
+      targetAudience,
+      scopes
     });
+
+    // Cache token based on its actual expiration time
+    const payload = decodeJWTPayload(accessToken);
+    const tokenExp = payload?.exp * 1000; // Convert to milliseconds
+    const cacheUntil = tokenExp ? Math.min(tokenExp - (60 * 1000), Date.now() + (4 * 60 * 1000)) : Date.now() + (4 * 60 * 1000);
+    
+    tokenCache.set(cacheKey, {
+      token: accessToken,
+      expires: cacheUntil // Cache until 1 minute before token expires, or 4 minutes max
+    });
+
+    console.log('Successfully obtained and cached access token');
+    return accessToken;
   } catch (error) {
-    console.error("Failed to generate auth token:", error);
+    console.error("Failed to get access token:", error);
     throw error;
   }
+}
+
+// Legacy function for backward compatibility
+async function getAuthToken(): Promise<string> {
+  return getAccessToken("https://tools.local/tickets", ["tickets.read", "tickets.write"]);
 }
 
 export const helpdeskAgent = new Agent({
@@ -46,23 +105,35 @@ export const helpdeskAgent = new Agent({
     Keep your responses helpful, clear, and to the point. Always aim to resolve user queries efficiently.
     
     For ticket operations:
-    1. First call getAuthToken to get your authentication token
-    2. Use the token with ticketsTool or createTicketTool
-    3. The system will automatically handle your identity from the token
+    1. To read tickets: Call getTicketsToken, then use the token with ticketsTool
+    2. To create tickets: Call getCreateTicketToken, then use the token with createTicketTool
+    3. The system uses scope-based permissions - tokens are issued with only needed permissions
   `,
   model: openai("gpt-4o-mini"),
   tools: {
     ticketsTool,
     createTicketTool,
-    getAuthToken: createTool({
-      id: "getAuthToken",
-      description: "Generate JWT authentication token for ticket operations",
+    getTicketsToken: createTool({
+      id: "getTicketsToken", 
+      description: "Get access token for reading tickets",
       inputSchema: z.object({}),
       outputSchema: z.object({
         authToken: z.string(),
       }),
       execute: async () => {
-        const token = await getAuthToken();
+        const token = await getAccessToken("https://tools.local/tickets", ["tickets.read"]);
+        return { authToken: token };
+      },
+    }),
+    getCreateTicketToken: createTool({
+      id: "getCreateTicketToken",
+      description: "Get access token for creating tickets", 
+      inputSchema: z.object({}),
+      outputSchema: z.object({
+        authToken: z.string(),
+      }),
+      execute: async () => {
+        const token = await getAccessToken("https://tools.local/tickets", ["tickets.write"]);
         return { authToken: token };
       },
     }),

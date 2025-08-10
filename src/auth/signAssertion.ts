@@ -5,8 +5,14 @@ import { randomUUID } from "node:crypto";
 
 type Opts = {
   privateJwkPath: string; // e.g., secrets/<kid>.private.jwk.json or http://localhost:8787/.well-known/jwks.json
-  audience: string; // the tool API base URL or identifier
+  audience: string; // the token exchange endpoint
   agentId?: string; // Optional agent ID, used when fetching from HTTP endpoint
+};
+
+type TokenExchangeOpts = {
+  privateJwkPath: string;
+  agentId?: string;
+  tokenServiceUrl?: string;
 };
 
 export async function makeClientAssertion({ privateJwkPath, audience, agentId }: Opts) {
@@ -53,4 +59,74 @@ export async function makeClientAssertion({ privateJwkPath, audience, agentId }:
     .setExpirationTime(now + 60) // 60s lifetime
     .setJti(randomUUID())
     .sign(key);
+}
+
+// Create client assertion for token exchange
+export async function createClientAssertion({ 
+  privateJwkPath, 
+  agentId,
+  tokenServiceUrl = "https://token.example"
+}: TokenExchangeOpts) {
+  return await makeClientAssertion({
+    privateJwkPath,
+    audience: `${tokenServiceUrl}/exchange`,
+    agentId
+  });
+}
+
+// Exchange client assertion for access token
+export async function exchangeForAccessToken({
+  privateJwkPath,
+  agentId,
+  tokenServiceUrl = "http://localhost:8787",
+  targetAudience,
+  scopes = []
+}: TokenExchangeOpts & {
+  targetAudience: string;
+  scopes?: string[];
+}) {
+  console.log(`Attempting token exchange with service: ${tokenServiceUrl}`);
+  console.log(`Target audience: ${targetAudience}, Scopes: ${scopes.join(',')}`);
+
+  try {
+    // Step 1: Create client assertion
+    const assertion = await createClientAssertion({
+      privateJwkPath,
+      agentId,
+      tokenServiceUrl: "https://token.example" // Token service expects this specific audience
+    });
+
+    console.log(`Created client assertion for agent: ${agentId}`);
+
+    // Step 2: Exchange for access token
+    const exchangeUrl = `${tokenServiceUrl}/token/exchange`;
+    console.log(`Making request to: ${exchangeUrl}`);
+
+    const response = await fetch(exchangeUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${assertion}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        audience: targetAudience,
+        scopes: scopes
+      })
+    });
+
+    console.log(`Response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Token exchange failed: ${response.status} ${errorText}`);
+      throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
+    }
+
+    const tokenData = await response.json();
+    console.log('Token exchange successful');
+    return tokenData.access_token;
+  } catch (error) {
+    console.error('Token exchange error details:', error);
+    throw error;
+  }
 }
