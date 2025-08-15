@@ -1,8 +1,8 @@
 # AI Agent Authentication System
 
-A sophisticated JWT-based authentication and authorization system for AI agents, built with the Mastra framework. This system implements OAuth2-style token exchange with Ed25519 cryptographic signatures and scope-based permissions.
+A JWT-based authentication and authorization system for AI agents, built with the Mastra framework. This system implements OAuth2-style token exchange with Ed25519 cryptographic signatures and scope-based permissions.
 
-## 🚀 Features
+## Features
 
 - **JWT Token Exchange**: OAuth2-style client assertion flow for secure token issuance
 - **Ed25519 Signatures**: Cryptographically secure digital signatures using Ed25519 algorithm
@@ -12,14 +12,14 @@ A sophisticated JWT-based authentication and authorization system for AI agents,
 - **Replay Protection**: Built-in replay attack prevention with JWT ID tracking
 - **Token Caching**: Intelligent token caching with automatic expiration handling
 
-## 📋 Prerequisites
+## Prerequisites
 
 - Node.js >= 20.9.0
 - pnpm package manager
 - Token service running (separate service for token exchange)
 - JWKS service running (serves public keys for verification)
 
-## 🛠️ Installation
+## Installation
 
 ```bash
 # Install dependencies
@@ -30,7 +30,7 @@ cp .env.example .env
 # Edit .env with your configuration
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -64,7 +64,7 @@ The system requires an Ed25519 private key for the agent. Example structure:
 }
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ### Authentication Flow
 
@@ -81,11 +81,13 @@ The system requires an Ed25519 private key for the agent. Example structure:
 ### Components
 
 1. **Help Desk Agent** (`src/mastra/agents/helpdesk-agent.ts`)
+
    - AI-powered agent for ticket management
    - Handles JWT token acquisition and caching
    - Integrates with ticket tools
 
 2. **Ticket Tools** (`src/mastra/tools/tickets-tool.ts`)
+
    - Get tickets (requires `tickets.read` scope)
    - Create tickets (requires `tickets.write` scope)
    - JWT verification and scope validation
@@ -94,7 +96,7 @@ The system requires an Ed25519 private key for the agent. Example structure:
    - `signAssertion.ts`: Creates client assertions and handles token exchange
    - `verifyAssertion.ts`: Verifies access tokens and validates scopes
 
-## 🚦 Running the System
+## Running the System
 
 ### 1. Start Required Services
 
@@ -117,7 +119,7 @@ Update the policy in the token service to include your agent:
 export const POLICY: Record<string, string[]> = {
   "agent://worf": ["tickets.read", "tickets.write"],
   // Add other agents as needed
-}
+};
 ```
 
 ### 3. Start the Mastra Application
@@ -125,29 +127,32 @@ export const POLICY: Record<string, string[]> = {
 ```bash
 # Build and run
 pnpm build
-pnpm dev
+pnpm run dev
 
 # The playground will be available at http://localhost:4112
 ```
 
-## 🔒 Security Features
+## Security Features
 
 ### Token Lifecycle Management
+
 - **Smart Caching**: Tokens cached based on actual expiration time
 - **Automatic Cleanup**: Expired tokens removed from cache
 - **Buffer Time**: Tokens refreshed before expiration
 
 ### Replay Protection
+
 - **JWT ID Tracking**: Each token has unique identifier (jti)
 - **Per-Agent Tracking**: Same agent can reuse cached tokens
 - **Attack Prevention**: Prevents replay attacks from intercepted tokens
 
 ### Scope-Based Authorization
+
 - **Fine-Grained Permissions**: Each operation requires specific scopes
 - **Policy Enforcement**: Centralized policy in token service
 - **Tool-Level Validation**: Each tool validates required scopes
 
-## 📝 Usage Example
+## Usage Example
 
 ### Interacting with the Help Desk Agent
 
@@ -156,6 +161,7 @@ pnpm dev
 3. **Automatic Token Management**: Tokens cached and reused efficiently
 
 The agent will:
+
 - Automatically acquire access tokens when needed
 - Cache tokens to minimize token service requests
 - Handle token expiration gracefully
@@ -184,10 +190,12 @@ The agent will:
 ### JWKS Configuration
 
 The JWKS service should include public keys for both:
+
 - Agent keys (for client assertions)
 - Token service keys (for access tokens)
 
 Both keys may use the same public key material but with different `kid` values:
+
 - `kid: "a1-ed25519-2023-10-01-12345678"` for agent assertions
 - `kid: "agent://worf"` for token service tokens
 
@@ -202,13 +210,13 @@ Both keys may use the same public key material but with different `kid` values:
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| "no applicable key found" | Key ID mismatch | Ensure JWKS has correct public key |
-| "signature verification failed" | Key mismatch | Public key doesn't match private key |
-| "Insufficient permissions" | Missing scope | Check token service policy |
-| "exp claim failed" | Token expired | Check token caching logic |
-| "Replay detected" | Token reuse | Normal for cached tokens |
+| Issue                           | Cause           | Solution                             |
+| ------------------------------- | --------------- | ------------------------------------ |
+| "no applicable key found"       | Key ID mismatch | Ensure JWKS has correct public key   |
+| "signature verification failed" | Key mismatch    | Public key doesn't match private key |
+| "Insufficient permissions"      | Missing scope   | Check token service policy           |
+| "exp claim failed"              | Token expired   | Check token caching logic            |
+| "Replay detected"               | Token reuse     | Normal for cached tokens             |
 
 ## 📚 Project Structure
 
