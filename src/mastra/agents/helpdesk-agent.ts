@@ -29,12 +29,19 @@ async function getAccessToken(
   scopes: string[]
 ): Promise<string> {
   try {
-    const privateJwkPath =
-      process.env.HELPDESK_PRIVATE_JWK_PATH ||
-      "/home/brucec/techplay2/sandbox/auth-template-hackathon-v0/secrets/a1-ed25519-2025-08-15-d0a5e088.private.jwk.json";
-    const agentId = process.env.HELPDESK_AGENT_ID || "agent://demo/a1";
-    const tokenServiceUrl =
-      process.env.TOKEN_SERVICE_URL || "http://localhost:8787";
+    const privateJwkPath = process.env.HELPDESK_PRIVATE_JWK_PATH;
+    const agentId = process.env.HELPDESK_AGENT_ID;
+    const tokenServiceUrl = process.env.TOKEN_SERVICE_URL;
+
+    if (!privateJwkPath) {
+      throw new Error("HELPDESK_PRIVATE_JWK_PATH environment variable is required");
+    }
+    if (!agentId) {
+      throw new Error("HELPDESK_AGENT_ID environment variable is required");
+    }
+    if (!tokenServiceUrl) {
+      throw new Error("TOKEN_SERVICE_URL environment variable is required");
+    }
 
     console.log(
       `Getting access token for audience: ${targetAudience}, scopes: ${scopes.join(
@@ -95,13 +102,6 @@ async function getAccessToken(
   }
 }
 
-// Legacy function for backward compatibility
-async function getAuthToken(): Promise<string> {
-  return getAccessToken("https://tools.local/tickets", [
-    "tickets.read",
-    "tickets.write",
-  ]);
-}
 
 export const helpdeskAgent = new Agent({
   name: "Help Desk Agent",
